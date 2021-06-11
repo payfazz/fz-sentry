@@ -62,7 +62,7 @@ func (c *slackCore) Write(e zapcore.Entry, fields []zapcore.Field) error {
 		err := slack.PostWebhook(c.hookURL, &msg)
 
 		if err != nil {
-			fields = append(fields, zap.String("slack_error", "send event to slack error"))
+			fields = append(fields, zap.Error(err), zap.String("slack_error", "send event to slack error"))
 		}
 	}
 
