@@ -10,12 +10,14 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"time"
 )
 
 type ServerInterceptorsOptions struct {
 	Logger                       *zap.Logger
 	WithPanicRecovery            bool
 	WithPrometheus               bool
+	WithUnaryTimeout             time.Duration
 	AdditionalUnaryInterceptors  []grpc.UnaryServerInterceptor
 	AdditionalStreamInterceptors []grpc.StreamServerInterceptor
 }
@@ -45,6 +47,14 @@ func ServerInterceptors(options ServerInterceptorsOptions) []grpc.ServerOption {
 	if options.WithPrometheus {
 		unaryInterceptors = append(unaryInterceptors, grpc_prometheus.UnaryServerInterceptor)
 		streamInterceptors = append(streamInterceptors, grpc_prometheus.StreamServerInterceptor)
+	}
+
+	if options.WithUnaryTimeout > 0 {
+		unaryInterceptors = append(unaryInterceptors, func(ctx context.Context, req interface{}, _ *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (resp interface{}, err error) {
+			newCtx, cancel := context.WithTimeout(ctx, options.WithUnaryTimeout)
+			defer cancel()
+			return handler(newCtx, req)
+		})
 	}
 
 	unaryInterceptors = append(unaryInterceptors, options.AdditionalUnaryInterceptors...)
