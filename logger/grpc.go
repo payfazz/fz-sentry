@@ -4,11 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"google.golang.org/grpc/status"
+	"path"
 	"runtime"
 	"time"
 
 	"github.com/go-kit/kit/endpoint"
+	"github.com/grpc-ecosystem/go-grpc-middleware"
 	"go.uber.org/zap"
+	"google.golang.org/grpc"
 )
 
 const (
@@ -19,12 +23,84 @@ const (
 func GrpcMiddleware(logger *zap.Logger) endpoint.Middleware {
 	return func(f endpoint.Endpoint) endpoint.Endpoint {
 		return func(ctx context.Context, in interface{}) (out interface{}, err error) {
-			ctx = NewRequest(ctx, logger)
-			return f(ctx, in)
+			newCtx := NewRequest(ctx, logger)
+			return f(newCtx, in)
 		}
 	}
 }
 
+func GrpcUnaryServerInterceptor(logger *zap.Logger) grpc.UnaryServerInterceptor {
+	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (resp interface{}, err error) {
+		newCtx := NewRequest(ctx, logger)
+		return handler(newCtx, req)
+	}
+}
+
+func GrpcStreamServerInterceptor(logger *zap.Logger) grpc.StreamServerInterceptor {
+	return func(srv interface{}, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
+		newCtx := NewRequest(ss.Context(), logger)
+		wrappedStream := grpc_middleware.WrapServerStream(ss)
+		wrappedStream.WrappedContext = newCtx
+		return handler(srv, wrappedStream)
+	}
+}
+
+func GrpcEndpointUnaryServerInterceptor() grpc.UnaryServerInterceptor {
+	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (resp interface{}, err error) {
+		log := GetLogger(ctx)
+		service := path.Dir(info.FullMethod)[1:]
+		method := path.Base(info.FullMethod)
+
+		log.Info(fmt.Sprintf("begin grpc request: %s/%s", service, method),
+			zap.String("service", service),
+			zap.String("method", method),
+		)
+		start := time.Now()
+		resp, err = handler(ctx, req)
+		elapsed := time.Since(start)
+		code := status.Code(err).String()
+
+		log.Info(fmt.Sprintf("end grpc request: %s", elapsed),
+			zap.Duration("elapsed", elapsed),
+			zap.String("service", service),
+			zap.String("method", method),
+			zap.String("code", code),
+		)
+
+		return resp, err
+	}
+}
+
+func GrpcEndpointStreamServerInterceptor() grpc.StreamServerInterceptor {
+	return func(srv interface{}, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
+		log := GetLogger(ss.Context())
+		service := path.Dir(info.FullMethod)[1:]
+		method := path.Base(info.FullMethod)
+
+		log.Info(fmt.Sprintf("begin grpc request: %s/%s", service, method),
+			zap.String("service", service),
+			zap.String("method", method),
+		)
+		start := time.Now()
+		err := handler(srv, ss)
+		elapsed := time.Since(start)
+		code := status.Code(err).String()
+
+		log.Info(fmt.Sprintf("end grpc request: %s", elapsed),
+			zap.Duration("elapsed", elapsed),
+			zap.String("service", service),
+			zap.String("method", method),
+			zap.String("code", code),
+		)
+
+		return err
+	}
+}
+
+// GrpcEndpointMiddleware is middleware for grpc request
+//
+// Deprecated: funcName will be wrong if using grpc interceptors, please use GrpcEndpointUnaryServerInterceptor and
+// GrpcEndpointStreamServerInterceptor instead
 func GrpcEndpointMiddleware() endpoint.Middleware {
 	return func(f endpoint.Endpoint) endpoint.Endpoint {
 		var start time.Time
