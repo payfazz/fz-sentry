@@ -146,10 +146,9 @@ func GrpcResponseMiddleware() endpoint.Middleware {
 			f,
 			nil,
 			func(ctx context.Context, log *zap.Logger, out interface{}) error {
-				var by []byte
-				_ = json.Unmarshal(by, out)
+				resp, _ := json.Marshal(out)
 				log.Debug("grpc response payload",
-					zap.String("payload", string(by)),
+					zap.String("payload", string(resp)),
 				)
 				return nil
 			},
