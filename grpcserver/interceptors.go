@@ -6,6 +6,7 @@ import (
 	grpc_recovery "github.com/grpc-ecosystem/go-grpc-middleware/recovery"
 	grpc_prometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
 	"github.com/payfazz/fz-sentry/logger"
+	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -17,6 +18,7 @@ type ServerInterceptorsOptions struct {
 	Logger                       *zap.Logger
 	WithPanicRecovery            bool
 	WithPrometheus               bool
+	WithOpenTelemetry            bool
 	WithUnaryTimeout             time.Duration
 	AdditionalUnaryInterceptors  []grpc.UnaryServerInterceptor
 	AdditionalStreamInterceptors []grpc.StreamServerInterceptor
@@ -30,14 +32,23 @@ func ServerInterceptors(options ServerInterceptorsOptions) []grpc.ServerOption {
 		return status.Error(codes.Internal, "")
 	})
 
-	unaryInterceptors := []grpc.UnaryServerInterceptor{
+	var unaryInterceptors []grpc.UnaryServerInterceptor
+	var streamInterceptors []grpc.StreamServerInterceptor
+
+	if options.WithOpenTelemetry {
+		unaryInterceptors = append(unaryInterceptors, otelgrpc.UnaryServerInterceptor())
+		streamInterceptors = append(streamInterceptors, otelgrpc.StreamServerInterceptor())
+	}
+
+	unaryInterceptors = append(unaryInterceptors,
 		logger.GrpcUnaryServerInterceptor(options.Logger),
 		logger.GrpcEndpointUnaryServerInterceptor(),
-	}
-	streamInterceptors := []grpc.StreamServerInterceptor{
+	)
+
+	streamInterceptors = append(streamInterceptors,
 		logger.GrpcStreamServerInterceptor(options.Logger),
 		logger.GrpcEndpointStreamServerInterceptor(),
-	}
+	)
 
 	if options.WithPanicRecovery {
 		unaryInterceptors = append(unaryInterceptors, grpc_recovery.UnaryServerInterceptor(recoveryOption))
